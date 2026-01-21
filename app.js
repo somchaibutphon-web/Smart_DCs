@@ -1,48 +1,30 @@
 /************************************************************
  * app.js — VISITOR DC-SPLIT (GitHub Pages) — FULL PACKAGE
+ * ✅ ปรับ Popup QR ให้ “ไม่บิดเบี้ยว” + มาตรฐาน
  * - ใช้ JSONP เรียก Google Apps Script Web App (ไม่ติด CORS)
- * - ต้องมีไฟล์ index.html ที่มี element id ตามนี้:
- *   #registration-form, #dcSelect, #fullName, #phone
- *   #genderGroup (มี input radio name="gender"), #companyGroup
- *   #companyOtherWrap, #companyOther, #submitBtn
- *
- * Dependencies (ใน index.html):
- * - jQuery
- * - SweetAlert2
- * - qrcodejs
- * - html2canvas
+ * - QR แสดงจาก <canvas> โดยตรง (คม + ไม่ยืด)
+ * - CSS บังคับเป็นสี่เหลี่ยมจัตุรัส (aspect-ratio: 1/1)
+ * - ตอนดาวน์โหลด ใช้ canvas ของ QR โดยตรง (คมที่สุด) ไม่ผ่าน html2canvas
  ************************************************************/
 
 /***********************
  * GitHub Frontend Config
  ***********************/
 const CFG = {
-  // ✅ ใส่ URL ของ Web App (ต้องเป็น /exec)
   GAS_URL: 'https://script.google.com/macros/s/AKfycbxYsepGAWnvvxM8lS68fQJgxMBF_7aDcF_-f6qX_RdA3-j8FhWLHoR-KgyYF2U2iGg7xA/exec',
-
-  // ✅ ต้องตรงกับ API_SECRET ใน Code.gs
   SECRET: 'CHANGE_ME_SUPER_SECRET_906',
-
-  // ✅ ส่ง origin ให้ฝั่ง GAS ตรวจ (ถ้าคุณเปิด ALLOWED_ORIGINS)
   ORIGIN: window.location.origin,
-
-  // JSONP timeout
   JSONP_TIMEOUT_MS: 15000,
-
-  // ตั้งชื่อไฟล์ตอนดาวน์โหลด
   DOWNLOAD_PREFIX: 'visitor',
-
-  // รูปกฎระเบียบ (เหมือนเดิม)
   PRIVACY_IMG_URL: 'https://lh5.googleusercontent.com/d/1yR7QQHgqPNOhOOVKl7jGK_yrMf7UOYxn',
-
-  // fallback list ถ้าโหลดจากชีท Radio ไม่ได้
   COMPANY_FALLBACK: [
     "CPAXTRA","Smart DC","Makro","CPF","ALL Now","Linfox",
     "บุคคลภายนอก","หน่วยงานราชการ","คนลงสินค้า","อื่นๆ"
   ],
+  AUTO_ID_PREFIX: 'DCs01',
 
-  // prefix AutoID
-  AUTO_ID_PREFIX: 'DCs01'
+  // ✅ ขนาด QR ที่สร้าง (ยิ่งใหญ่ยิ่งคม)
+  QR_SIZE: 768
 };
 
 /***********************
@@ -55,11 +37,15 @@ function escapeHtml(s) {
     .replace(/'/g, "&#039;");
 }
 
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename;
+  a.click();
+}
 
 /***********************
  * JSONP Helper (No CORS)
- * - GAS ต้องรองรับ callback ที่ doGet
  ***********************/
 function jsonpRequest(params) {
   return new Promise((resolve, reject) => {
@@ -131,13 +117,11 @@ function showPrivacyMessage() {
           <img src="${imgUrl}" alt="กฎระเบียบความปลอดภัย" style="width:100%;display:block;">
         </a>
       </div>
-
       <ol style="margin:0 12px 12px;padding-left:18px;color:#1f2937;font-size:14px;line-height:1.55">
         <li>ให้ท่านศึกษากฏระเบียบความปลอดภัยการเข้าพื้นที่คลังสินค้าอย่างละเอียด</li>
         <li>ข้าฯ ยินยอมเปิดเผยข้อมูลส่วนบุคคล</li>
         <li>ข้าฯจะยึดถือปฏิบัติกฏระเบียบความปลอดภัยอย่างเคร่งครัด</li>
       </ol>
-
       <label style="display:flex;justify-content:center;align-items:center;gap:10px;padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;cursor:pointer;">
         <input type="radio" id="ackRadio" name="ack" />
         <span>รับทราบกฎระเบียบความปลอดภัย</span>
@@ -303,57 +287,124 @@ function bindInputFilters() {
 }
 
 /***********************
- * QR Popup HTML (mobile-first)
+ * ✅ QR Renderer (No distortion)
+ * - คืนค่า: { host, getCanvas, getPngDataUrl }
  ***********************/
-function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, companyResolved, phone, timestampClient }) {
+function createQrRenderer(text) {
+  const host = document.createElement('div');
+
+  // qrcodejs จะสร้าง <canvas> (หรือ <img> แล้วแต่ browser)
+  // เราบังคับให้คงสัดส่วนด้วย CSS ใน popup
+  new QRCode(host, {
+    text,
+    width: CFG.QR_SIZE,
+    height: CFG.QR_SIZE,
+    correctLevel: QRCode.CorrectLevel.M
+  });
+
+  const getCanvas = () => host.querySelector('canvas') || null;
+
+  const getPngDataUrl = () => {
+    const c = getCanvas();
+    if (c) return c.toDataURL('image/png');
+    const img = host.querySelector('img');
+    return img ? img.src : '';
+  };
+
+  return { host, getCanvas, getPngDataUrl };
+}
+
+/***********************
+ * ✅ QR Popup HTML — Standard + No stretch
+ * - ใช้ canvas ใส่ใน container แล้ว CSS คุมสัดส่วน
+ ***********************/
+function buildQrPopupHtml({ autoId, dc, dcName, fullName, gender, companyResolved, phone, timestampClient }) {
   return `
 <style>
   #qrWrap, #qrWrap *{ box-sizing:border-box; }
   #qrWrap{ font-family:'Sarabun',sans-serif; color:#0f172a; }
-  #qrWrap img{ width:100%; height:auto; display:block; }
-  #qrWrap code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   :root{
-    --q-bg:#fff; --q-bd:rgba(15,23,42,.10);
-    --q-ac:#F85B1A; --q-ac2:#FF6B6B; --q-muted:#64748b;
-    --q-r:18px;
+    --bg:#fff;
+    --bd:rgba(15,23,42,.10);
+    --muted:#64748b;
+    --shadow:0 18px 50px rgba(2,6,23,.18);
+    --r:18px;
+    --ac:#F85B1A;
+    --ac2:#FF6B6B;
   }
+
   .q{ width:100%; max-width:560px; margin:0 auto; }
   .qCard{
-    background:var(--q-bg); border:1px solid var(--q-bd);
-    border-radius:var(--q-r); overflow:hidden;
-    box-shadow:0 18px 50px rgba(2,6,23,.18);
+    background:var(--bg);
+    border:1px solid var(--bd);
+    border-radius:var(--r);
+    overflow:hidden;
+    box-shadow:var(--shadow);
   }
+
   .qTop{
     padding:12px 14px;
-    background:linear-gradient(135deg,var(--q-ac2),var(--q-ac));
-    color:#fff; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:linear-gradient(135deg,var(--ac2),var(--ac));
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
   }
   .qTopTitle{
     font-weight:900;
     font-size:clamp(12px, 3.4vw, 14px);
     line-height:1.15;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
     letter-spacing:.2px;
   }
   .qTopBadge{
-    flex:0 0 auto; font-size:11px; font-weight:900;
-    padding:7px 10px; border-radius:999px;
+    flex:0 0 auto;
+    font-size:11px;
+    font-weight:900;
+    padding:7px 10px;
+    border-radius:999px;
     background:rgba(255,255,255,.18);
     border:1px solid rgba(255,255,255,.25);
     white-space:nowrap;
   }
-  .qBody{ padding:12px 12px 0; }
-  .qQR{
-    width:min(72vw, 280px);
+
+  .qBody{ padding:14px 14px 0; }
+
+  /* ✅ QR container (square + no stretch) */
+  .qQrBox{
+    width:min(78vw, 320px);
     margin:0 auto;
+    padding:12px;
     background:#fff;
     border:1px solid rgba(148,163,184,.45);
     border-radius:18px;
-    padding:10px;
   }
+  .qQrFrame{
+    width:100%;
+    aspect-ratio: 1 / 1;      /* ✅ บังคับสี่เหลี่ยม */
+    display:grid;
+    place-items:center;
+    background:#fff;
+  }
+  .qQrFrame canvas,
+  .qQrFrame img{
+    width:100% !important;
+    height:100% !important;
+    max-width:100% !important;
+    max-height:100% !important;
+    object-fit:contain !important; /* ✅ ไม่ยืด */
+    image-rendering: pixelated;    /* ✅ ช่วยคมในบางเครื่อง */
+  }
+
   .qIdRow{
-    margin-top:10px;
-    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    margin-top:12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
     padding:10px 12px;
     border-radius:16px;
     background:#0b1220;
@@ -362,13 +413,23 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
   .qIdLabel{ font-size:11px; opacity:.85; margin-bottom:3px; }
   .qIdCode{ font-size:13px; font-weight:900; overflow-wrap:anywhere; word-break:break-word; }
   .qCopyBtn{
-    border:none; background:rgba(255,255,255,.16); color:#fff;
-    font-weight:900; font-size:12px; padding:9px 12px; border-radius:14px;
-    cursor:pointer; touch-action:manipulation; white-space:nowrap;
+    border:none;
+    background:rgba(255,255,255,.16);
+    color:#fff;
+    font-weight:900;
+    font-size:12px;
+    padding:9px 12px;
+    border-radius:14px;
+    cursor:pointer;
+    touch-action:manipulation;
+    white-space:nowrap;
   }
-  .qGrid{ margin-top:10px; display:grid; gap:8px; }
+
+  .qGrid{ margin-top:12px; display:grid; gap:8px; }
   .qRow{
-    display:grid; grid-template-columns:92px 1fr; gap:10px;
+    display:grid;
+    grid-template-columns:92px 1fr;
+    gap:10px;
     padding:10px 12px;
     border-radius:16px;
     border:1px solid rgba(148,163,184,.35);
@@ -376,30 +437,43 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
   }
   .qK{ font-size:12px; font-weight:900; color:#334155; white-space:nowrap; }
   .qV{ font-size:13px; color:#0f172a; overflow-wrap:anywhere; word-break:break-word; line-height:1.35; min-width:0; }
+
+  .qHint{
+    text-align:center;
+    font-size:12px;
+    color:var(--muted);
+    padding:12px 6px 12px;
+    line-height:1.35;
+  }
+
   .qActions{
-    position:sticky; bottom:0;
+    position:sticky;
+    bottom:0;
     padding:10px 12px calc(10px + env(safe-area-inset-bottom));
     background:rgba(255,255,255,.92);
     backdrop-filter:blur(10px);
     border-top:1px solid rgba(148,163,184,.25);
-    display:grid; gap:10px;
+    display:grid;
+    gap:10px;
   }
   .qBtn{
-    width:100%; border:none; cursor:pointer;
-    padding:12px 12px; border-radius:16px;
-    font-weight:900; font-size:14px;
+    width:100%;
+    border:none;
+    cursor:pointer;
+    padding:12px 12px;
+    border-radius:16px;
+    font-weight:900;
+    font-size:14px;
     touch-action:manipulation;
   }
   .qBtnPrimary{
-    color:#fff; background:linear-gradient(135deg,var(--q-ac),var(--q-ac2));
+    color:#fff;
+    background:linear-gradient(135deg,var(--ac),var(--ac2));
     box-shadow:0 10px 18px rgba(248,91,26,.25);
   }
-  .qHint{
-    text-align:center; font-size:12px; color:var(--q-muted);
-    padding:10px 6px 12px; line-height:1.35;
-  }
+
   @media (max-width:360px){
-    .qQR{ width:min(82vw, 260px); }
+    .qQrBox{ width:min(86vw, 280px); }
     .qRow{ grid-template-columns:80px 1fr; }
     .qV{ font-size:12px; }
   }
@@ -408,12 +482,15 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
 <div class="q" id="qrWrap">
   <div class="qCard" id="qrCard">
     <div class="qTop">
-      <div class="qTopTitle">เก็บQRCodeไว้สแกนออก</div>
+      <div class="qTopTitle">เก็บ QRCode ไว้สแกนออก</div>
       <div class="qTopBadge">แนะนำ: ดาวน์โหลดรูป</div>
     </div>
 
     <div class="qBody">
-      <div class="qQR"><img src="${escapeHtml(qrDataURL)}" alt="QR Code"></div>
+      <!-- ✅ เราจะเอา canvas ของ QR มา append ลงใน qQrFrame หลัง Swal เปิด -->
+      <div class="qQrBox">
+        <div class="qQrFrame" id="qrMount"></div>
+      </div>
 
       <div class="qIdRow">
         <div>
@@ -491,21 +568,12 @@ function bindSubmit() {
         timestampClient
       };
 
-      // QR data url
-      const qrHost = document.createElement('div');
-      new QRCode(qrHost, {
-        text: autoId,
-        width: 512,
-        height: 512,
-        correctLevel: QRCode.CorrectLevel.M
-      });
-      const qrCanvas = qrHost.querySelector('canvas');
-      const qrImg = qrHost.querySelector('img');
-      const qrDataURL = qrCanvas ? qrCanvas.toDataURL('image/png') : (qrImg ? qrImg.src : '');
+      // ✅ สร้าง QR renderer (ได้ canvas คมๆ)
+      const qr = createQrRenderer(autoId);
 
-      const htmlContent = buildQrPopupHtml({ qrDataURL, ...payload });
+      // ✅ สร้าง HTML popup (ไม่มี <img> แล้ว → ไม่ยืด/ไม่บิด)
+      const htmlContent = buildQrPopupHtml(payload);
 
-      // แสดง QR ก่อน (UX ดีบนมือถือ)
       Swal.fire({
         title: '',
         html: htmlContent,
@@ -514,7 +582,27 @@ function bindSubmit() {
         allowOutsideClick: true,
         width: 'clamp(320px, 92vw, 560px)',
         padding: '12px',
-        backdrop: true
+        backdrop: true,
+        didOpen: () => {
+          // ✅ mount QR canvas เข้าไปในกรอบ square
+          const mount = document.getElementById('qrMount');
+          if (mount) {
+            mount.innerHTML = '';
+            const canvas = qr.getCanvas();
+            const dataUrl = qr.getPngDataUrl();
+
+            if (canvas) {
+              // ใช้ canvas ตรงๆ (คมที่สุด)
+              mount.appendChild(canvas);
+            } else if (dataUrl) {
+              // fallback เป็น img ถ้าไม่มี canvas
+              const img = new Image();
+              img.alt = 'QR Code';
+              img.src = dataUrl;
+              mount.appendChild(img);
+            }
+          }
+        }
       }).then(() => {
         $('#registration-form')[0].reset();
         $('#companyOtherWrap').hide();
@@ -533,29 +621,18 @@ function bindSubmit() {
           }
         });
 
-        document.getElementById('download-btn')?.addEventListener('click', async () => {
-          const card = document.getElementById('qrCard');
-          if (!card) return;
-
-          const actions = card.querySelector('.qActions');
-          if (actions) actions.style.display = 'none';
-
-          const canvas = await html2canvas(card, {
-            scale: Math.min(3, window.devicePixelRatio || 2),
-            backgroundColor: '#ffffff',
-            useCORS: true
-          });
-
-          if (actions) actions.style.display = 'grid';
-
-          const a = document.createElement('a');
-          a.href = canvas.toDataURL('image/png');
-          a.download = `${CFG.DOWNLOAD_PREFIX}_${autoId}.png`;
-          a.click();
+        // ✅ ดาวน์โหลด “ไฟล์ QR เพียวๆ” จาก canvas โดยตรง (คมที่สุด ไม่บิด)
+        document.getElementById('download-btn')?.addEventListener('click', () => {
+          const dataUrl = qr.getPngDataUrl();
+          if (!dataUrl) {
+            Swal.fire({ icon: 'error', title: 'ดาวน์โหลดไม่สำเร็จ', text: 'ไม่พบข้อมูล QR' });
+            return;
+          }
+          downloadDataUrl(dataUrl, `${CFG.DOWNLOAD_PREFIX}_${autoId}_QR.png`);
         });
-      }, 150);
+      }, 120);
 
-      // ✅ save to backend (JSONP — no CORS)
+      // ✅ save to backend (JSONP)
       await api('saveData', payload);
 
     } catch (err) {
