@@ -11,22 +11,48 @@ const CFG = {
  * API helper
  ***********************/
 async function api(action, payload = {}) {
-  const res = await fetch(CFG.GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // GAS ชอบแบบนี้
-    body: JSON.stringify({
-      secret: CFG.SECRET,
-      origin: CFG.ORIGIN,
-      action,
-      payload
-    })
-  });
-  const data = await res.json().catch(() => ({}));
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 20000); // 20s timeout
+
+  let res;
+  try {
+    res = await fetch(CFG.GAS_URL, {
+      method: 'POST',
+      mode: 'cors',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        secret: CFG.SECRET,
+        origin: CFG.ORIGIN,
+        ua: navigator.userAgent, // (optional) ช่วย rate-limit key ฝั่ง GAS
+        action,
+        payload
+      }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(t);
+    throw new Error('Network error / CORS blocked / GAS unreachable: ' + String(err && err.message ? err.message : err));
+  } finally {
+    clearTimeout(t);
+  }
+
+  // ถ้าโดน redirect/403/500 จะช่วย debug ได้มาก
+  const text = await res.text().catch(() => '');
+  let data = {};
+  try { data = JSON.parse(text || '{}'); } catch (_) { data = {}; }
+
+  if (!res.ok) {
+    // บางที Apps Script ตอบ 200 แต่ data.ok=false → handle ข้างล่าง
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 180)}`);
+  }
+
   if (!data || data.ok !== true) {
     throw new Error((data && data.error) ? data.error : 'API error');
   }
   return data.data;
 }
+
 
 /***********************
  * Privacy Popup (เหมือนเดิม)
@@ -475,4 +501,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
+
 
