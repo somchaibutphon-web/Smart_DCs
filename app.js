@@ -2,45 +2,57 @@
  * GitHub Frontend Config
  ***********************/
 const CFG = {
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbxYsepGAWnvvxM8lS68fQJgxMBF_7aDcF_-f6qX_RdA3-j8FhWLHoR-KgyYF2U2iGg7xA/exec', // ✅ ใส่ URL ของ Web App
-  SECRET: 'CHANGE_ME_SUPER_SECRET_906',                      // ✅ ต้องตรงกับ API_SECRET ใน Code.gs
-  ORIGIN: window.location.origin
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbxYsepGAWnvvxM8lS68fQJgxMBF_7aDcF_-f6qX_RdA3-j8FhWLHoR-KgyYF2U2iGg7xA/exec', // ✅ ใส่ Web App /exec
+  SECRET: 'CHANGE_ME_SUPER_SECRET_906',                    // ✅ ต้องตรงกับ API_SECRET
+  ORIGIN: window.location.origin,
+  FETCH_TIMEOUT_MS: 15000
 };
+
+/***********************
+ * Fetch with timeout
+ ***********************/
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 /***********************
  * API helper
  ***********************/
 async function api(action, payload = {}) {
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 12000); // 12s timeout
-
   let res;
   try {
-    res = await fetch(CFG.GAS_URL, {
+    res = await fetchWithTimeout(CFG.GAS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ดีแล้ว
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ✅ GAS ถูกกับแบบนี้
       body: JSON.stringify({
         secret: CFG.SECRET,
         origin: CFG.ORIGIN,
         action,
         payload
-      }),
-      signal: controller.signal
-    });
-  } catch (err) {
-    clearTimeout(t);
-    throw new Error('Network error / CORS blocked / GAS unreachable: ' + (err?.message || err));
+      })
+    }, CFG.FETCH_TIMEOUT_MS);
+  } catch (e) {
+    // CORS/Network/Blocked/Timeout จะมาตกตรงนี้
+    throw new Error('Network error / CORS blocked / GAS unreachable: ' + (e?.message || e));
   }
-  clearTimeout(t);
 
-  const data = await res.json().catch(() => ({}));
+  const text = await res.text().catch(() => '');
+  let data = {};
+  try { data = JSON.parse(text); } catch (_) { data = {}; }
+
   if (!data || data.ok !== true) {
-    throw new Error((data && data.error) ? data.error : ('API error (HTTP ' + res.status + ')'));
+    throw new Error((data && data.error) ? data.error : 'API error');
   }
+
   return data.data;
 }
-
-
 
 /***********************
  * Privacy Popup (เหมือนเดิม)
@@ -101,7 +113,7 @@ function showPrivacyMessage() {
 }
 
 /***********************
- * Generate Unique ID (เหมือนเดิม)
+ * Generate Unique ID
  ***********************/
 const usedIds = new Set();
 function generateUniqueId() {
@@ -225,7 +237,6 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
   #qrWrap, #qrWrap *{ box-sizing:border-box; }
   #qrWrap{ font-family:'Sarabun',sans-serif; color:#0f172a; }
   #qrWrap img{ width:100%; height:auto; display:block; }
-  #qrWrap code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   :root{
     --q-bg:#fff; --q-bd:rgba(15,23,42,.10);
     --q-ac:#F85B1A; --q-ac2:#FF6B6B; --q-muted:#64748b;
@@ -244,10 +255,9 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
   }
   .qTopTitle{
     font-weight:900;
-    font-size:clamp(12px, 3.4vw, 14px);
+    font-size:clamp(12px, 3.2vw, 13px);
     line-height:1.15;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    letter-spacing:.2px;
   }
   .qTopBadge{
     flex:0 0 auto; font-size:11px; font-weight:900;
@@ -278,7 +288,7 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
   .qCopyBtn{
     border:none; background:rgba(255,255,255,.16); color:#fff;
     font-weight:900; font-size:12px; padding:9px 12px; border-radius:14px;
-    cursor:pointer; touch-action:manipulation; white-space:nowrap;
+    cursor:pointer; white-space:nowrap;
   }
   .qGrid{ margin-top:10px; display:grid; gap:8px; }
   .qRow{
@@ -302,7 +312,6 @@ function buildQrPopupHtml({ qrDataURL, autoId, dc, dcName, fullName, gender, com
     width:100%; border:none; cursor:pointer;
     padding:12px 12px; border-radius:16px;
     font-weight:900; font-size:14px;
-    touch-action:manipulation;
   }
   .qBtnPrimary{
     color:#fff; background:linear-gradient(135deg,var(--q-ac),var(--q-ac2));
@@ -410,11 +419,11 @@ $('#registration-form').on('submit', async function (e) {
     const qrImg = qrHost.querySelector('img');
     const qrDataURL = qrCanvas ? qrCanvas.toDataURL('image/png') : (qrImg ? qrImg.src : '');
 
+    // show popup first (มือถือใช้ง่าย)
     const htmlContent = buildQrPopupHtml({ qrDataURL, ...payload });
 
-    // แสดง QR ก่อน (UX ดีบนมือถือ)
     Swal.fire({
-      title: '<span class="qr-title">เก็บ QRCode ไว้สแกนออก</span>',
+      title: '<span style="display:block;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1">เก็บ QRCode ไว้สแกนออก</span>',
       html: htmlContent,
       showConfirmButton: false,
       showCloseButton: true,
@@ -429,7 +438,7 @@ $('#registration-form').on('submit', async function (e) {
       showPrivacyMessage();
     });
 
-    // bind buttons inside popup
+    // bind popup buttons
     setTimeout(() => {
       document.getElementById('copy-id')?.addEventListener('click', async () => {
         try {
@@ -489,6 +498,3 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
-
-
-
