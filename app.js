@@ -15,6 +15,12 @@ const CFG = {
   SECRET: 'CHANGE_ME_SUPER_SECRET_906',
   ORIGIN: window.location.origin,
   JSONP_TIMEOUT_MS: 15000,
+    // ✅ ถ้า true: 1 session (จนปิดแท็บ) จะขึ้นครั้งเดียว
+  PRIVACY_ONCE_PER_SESSION: false,
+
+  // ✅ preload รูปก่อนเปิด popup (ช่วยเร็ว/นิ่ง)
+  PRIVACY_PRELOAD_TIMEOUT_MS: 1200,
+
 
   DOWNLOAD_PREFIX: 'visitor',
   PRIVACY_IMG_URL: 'https://lh5.googleusercontent.com/d/1yR7QQHgqPNOhOOVKl7jGK_yrMf7UOYxn',
@@ -107,6 +113,65 @@ function api(action, payload = null) {
   return jsonpRequest(params);
 }
 
+function preloadImage(url, timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    if (!url) return resolve(false);
+    const img = new Image();
+    let done = false;
+
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve(false);
+    }, Math.max(200, timeoutMs || 1200));
+
+    img.onload = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(true);
+    };
+    img.onerror = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(false);
+    };
+
+    img.src = url;
+  });
+}
+
+function shouldShowPrivacy() {
+  if (!CFG.PRIVACY_ONCE_PER_SESSION) return true;
+  return sessionStorage.getItem('privacy_ack_v1') !== '1';
+}
+
+function markPrivacyAck() {
+  if (!CFG.PRIVACY_ONCE_PER_SESSION) return;
+  sessionStorage.setItem('privacy_ack_v1', '1');
+}
+
+/** ✅ เรียกตัวนี้ตอนเปิดหน้า: เร็ว + เสถียร */
+async function showPrivacyFast() {
+  if (!shouldShowPrivacy()) {
+    // ถ้าไม่ต้องโชว์แล้ว ให้แสดงฟอร์มทันที
+    const form = document.getElementById('registration-form');
+    if (form) form.style.display = 'block';
+    return;
+  }
+
+  // ซ่อนฟอร์มทันทีเพื่อ UX
+  const form = document.getElementById('registration-form');
+  if (form) form.style.display = 'none';
+
+  // preload รูปแบบ “ไม่บล็อค” นานเกินไป
+  await preloadImage(CFG.PRIVACY_IMG_URL, CFG.PRIVACY_PRELOAD_TIMEOUT_MS);
+
+  // เปิด popup
+  showPrivacyMessage();
+}
+
 /***********************
  * Privacy Popup
  ***********************/
@@ -149,13 +214,18 @@ function showPrivacyMessage() {
     allowEscapeKey: false,
     allowEnterKey: false,
     didOpen: () => {
+      // ✅ กัน listener ซ้อน (ถ้า popup ถูกเรียกซ้ำ)
       const r = document.getElementById('ackRadio');
-      r?.addEventListener('change', function () {
+      if (!r) return;
+
+      r.onchange = null;
+      r.addEventListener('change', function () {
         if (this.checked) {
           acknowledged = true;
+          markPrivacyAck();   // ✅ จำไว้ใน session (ถ้าเปิด)
           Swal.close();
         }
-      });
+      }, { once: true });
     },
     willClose: () => {
       if (acknowledged) {
@@ -169,6 +239,7 @@ function showPrivacyMessage() {
     }
   });
 }
+
 
 /***********************
  * Generate Unique ID
@@ -665,20 +736,26 @@ function bindSubmit() {
 /***********************
  * Init
  ***********************/
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    bindInputFilters();
-    bindSubmit();
+document.addEventListener('DOMContentLoaded', () => {
+  // bind พื้นฐานก่อน (ไม่พึ่ง network)
+  bindInputFilters();
+  bindSubmit();
 
-    await loadDCOptions();
-    await loadCompanyOptions();
+  // ✅ Privacy โผล่ก่อนทันที (ไม่รอ GAS)
+  showPrivacyFast();
 
-    showPrivacyMessage();
-  } catch (err) {
-    Swal.fire({
-      icon: 'error',
-      title: 'โหลดข้อมูลเริ่มต้นไม่สำเร็จ',
-      text: 'Network error / GAS unreachable: ' + String(err && err.message ? err.message : err)
-    });
-  }
+  // ✅ โหลดข้อมูลแบบขนาน (ไม่บล็อค UI)
+  (async () => {
+    try {
+      await Promise.allSettled([
+        loadDCOptions(),
+        loadCompanyOptions()
+      ]);
+      // ไม่ต้องทำอะไรเพิ่ม — ถ้าโหลดไม่ได้ company ก็มี fallback อยู่แล้ว
+    } catch (_) {
+      // เงียบได้ (เพราะเราไม่อยากให้ UI พังตอนเปิดหน้า)
+    }
+  })();
 });
+
+
