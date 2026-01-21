@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Visitor ลงทะเบียนเข้า-ออกพื้นที่</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- QR -->
+  <script src="https://cdn.jsdelivr.net/gh/davidshimjs/qrcodejs/qrcode.min.js"></script>
+
+  <!-- Capture to PNG -->
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <header class="appHeader">
+    <h1>Visitor ลงทะเบียนเข้า-ออกพื้นที่</h1>
+    <p class="sub">กรอกข้อมูลให้ครบ แล้วเก็บ QR เพื่อสแกนออก</p>
+  </header>
+
+  <main class="container">
+    <form id="registration-form" class="card" novalidate>
+      <div class="form-group">
+        <label for="dcSelect" class="required">DC</label>
+        <select id="dcSelect" required>
+          <option value="">-- เลือก DC --</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="fullName" class="required">ชื่อ-นามสกุล</label>
+        <input type="text" id="fullName" placeholder="เช่น สมชาย ใจดี" required />
+      </div>
+
+      <div class="form-group">
+        <label class="required">เพศ</label>
+        <div class="radio-row" id="genderGroup">
+          <label class="radio-chip">
+            <input type="radio" name="gender" value="ชาย" required />
+            <span class="radio-dot" aria-hidden="true"></span> ชาย
+          </label>
+          <label class="radio-chip">
+            <input type="radio" name="gender" value="หญิง" required />
+            <span class="radio-dot" aria-hidden="true"></span> หญิง
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="phone" class="required">เบอร์โทรศัพท์</label>
+        <input type="text" id="phone" inputmode="numeric" placeholder="0XXXXXXXXX" required />
+        <small class="hint">ต้องขึ้นต้นด้วย 0 และเป็นตัวเลข 10 หลัก</small>
+      </div>
+
+      <div class="form-group">
+        <label class="required">บริษัท</label>
+        <div class="radio-row" id="companyGroup"></div>
+
+        <div class="company-other" id="companyOtherWrap">
+          <input type="text" id="companyOther" placeholder="กรอกชื่อบริษัท (เมื่อเลือก ‘อื่นๆ’)" />
+        </div>
+      </div>
+
+      <button type="submit" id="submitBtn" class="btnPrimary">บันทึกข้อมูล</button>
+    </form>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
