@@ -2,7 +2,7 @@
  * GitHub Frontend Config
  ***********************/
 const CFG = {
-  GAS_URL: 'https://script.google.com/macros/s/XXXXXX/exec', // ✅ ใส่ URL ของ Web App
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbxYsepGAWnvvxM8lS68fQJgxMBF_7aDcF_-f6qX_RdA3-j8FhWLHoR-KgyYF2U2iGg7xA/exec', // ✅ ใส่ URL ของ Web App
   SECRET: 'CHANGE_ME_SUPER_SECRET_906',                      // ✅ ต้องตรงกับ API_SECRET ใน Code.gs
   ORIGIN: window.location.origin
 };
@@ -475,3 +475,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
+
