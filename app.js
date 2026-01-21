@@ -1,49 +1,29 @@
 /*************************************************************
- * app.js — VISITOR DC-SPLIT (GitHub Pages) — FULL PACKAGE (V2)
+ * app.js — VISITOR DC-SPLIT (GitHub Pages) — FULL PACKAGE (FIX QR)
  * ✅ JSONP เรียก Google Apps Script Web App (ไม่ติด CORS)
- * ✅ SweetAlert QR ใหม่: ไม่บิดเบี้ยว / มาตรฐาน / มือถือสวย
+ * ✅ SweetAlert QR ใหม่: QR แสดงชัวร์ / ไม่บิด / โหลด PNG คม
  *
- * ต้องมี element id ใน index.html:
- *   #registration-form, #dcSelect, #fullName, #phone,
- *   #genderGroup (radio name="gender"), #companyGroup,
- *   #companyOtherWrap, #companyOther, #submitBtn
- *
- * Dependencies (ใน index.html):
- * - jQuery
- * - SweetAlert2
- * - qrcodejs
- * - html2canvas (optional; ในโค้ดนี้ดาวน์โหลด QR เพียวจาก canvas)
+ * Requires in index.html:
+ * - jQuery, SweetAlert2, qrcodejs
  ************************************************************/
 
 /***********************
  * GitHub Frontend Config
  ***********************/
 const CFG = {
-  // ✅ ใส่ URL ของ Web App (ต้องเป็น /exec)
   GAS_URL: 'https://script.google.com/macros/s/AKfycbxYsepGAWnvvxM8lS68fQJgxMBF_7aDcF_-f6qX_RdA3-j8FhWLHoR-KgyYF2U2iGg7xA/exec',
-
-  // ✅ ต้องตรงกับ API_SECRET ใน Code.gs
   SECRET: 'CHANGE_ME_SUPER_SECRET_906',
-
-  // ✅ ส่ง origin ให้ฝั่ง GAS ตรวจ (ถ้าคุณเปิด ALLOWED_ORIGINS)
   ORIGIN: window.location.origin,
-
-  // JSONP timeout
   JSONP_TIMEOUT_MS: 15000,
 
-  // ตั้งชื่อไฟล์ตอนดาวน์โหลด
   DOWNLOAD_PREFIX: 'visitor',
-
-  // รูปกฎระเบียบ (เหมือนเดิม)
   PRIVACY_IMG_URL: 'https://lh5.googleusercontent.com/d/1yR7QQHgqPNOhOOVKl7jGK_yrMf7UOYxn',
 
-  // fallback list ถ้าโหลดจากชีท Radio ไม่ได้
   COMPANY_FALLBACK: [
     "CPAXTRA","Smart DC","Makro","CPF","ALL Now","Linfox",
     "บุคคลภายนอก","หน่วยงานราชการ","คนลงสินค้า","อื่นๆ"
   ],
 
-  // prefix AutoID
   AUTO_ID_PREFIX: 'DCs01'
 };
 
@@ -206,6 +186,49 @@ function generateUniqueId() {
 }
 
 /***********************
+ * ✅ QR DataURL Generator (Fix: always visible)
+ * วาด QR ใน div ซ่อน → รอ 1 เฟรม → ดึง canvas/img เป็น dataURL
+ ***********************/
+function waitFrame() {
+  return new Promise(r => requestAnimationFrame(() => r()));
+}
+
+async function makeQrDataUrl(text) {
+  if (typeof QRCode !== 'function') throw new Error('ไม่พบไลบรารี qrcodejs (QRCode)');
+
+  const host = document.createElement('div');
+  host.style.position = 'fixed';
+  host.style.left = '-99999px';
+  host.style.top = '-99999px';
+  host.style.width = '512px';
+  host.style.height = '512px';
+  document.body.appendChild(host);
+
+  try {
+    // บางเวอร์ชันวาดไม่ทัน ต้องรอ 1-2 เฟรม
+    new QRCode(host, {
+      text: String(text),
+      width: 512,
+      height: 512,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+
+    await waitFrame();
+    await waitFrame();
+
+    const canvas = host.querySelector('canvas');
+    if (canvas) return canvas.toDataURL('image/png');
+
+    const img = host.querySelector('img');
+    if (img && img.src) return img.src;
+
+    throw new Error('สร้าง QR ไม่สำเร็จ (ไม่พบ canvas/img)');
+  } finally {
+    try { host.remove(); } catch (_) {}
+  }
+}
+
+/***********************
  * Load DC Options
  ***********************/
 async function loadDCOptions() {
@@ -312,55 +335,10 @@ function bindInputFilters() {
 }
 
 /***********************
- * QR Renderer (Canvas-first, no distortion)
- ***********************/
-function createQrRenderer(text) {
-  const host = document.createElement('div');
-  host.style.position = 'fixed';
-  host.style.left = '-99999px';
-  host.style.top = '-99999px';
-  document.body.appendChild(host);
-
-  // สร้าง QR ด้วย qrcodejs (ได้ canvas ที่คม)
-  new QRCode(host, {
-    text: String(text),
-    width: 512,
-    height: 512,
-    correctLevel: QRCode.CorrectLevel.M
-  });
-
-  const canvas = host.querySelector('canvas');
-  const img = host.querySelector('img');
-
-  function getCanvas() {
-    if (!canvas) return null;
-    // clone เพื่อไม่ผูกกับ host เดิม
-    const c = document.createElement('canvas');
-    c.width = canvas.width;
-    c.height = canvas.height;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(canvas, 0, 0);
-    return c;
-  }
-
-  function getPngDataUrl() {
-    if (canvas) return canvas.toDataURL('image/png');
-    if (img && img.src) return img.src;
-    return '';
-  }
-
-  function destroy() {
-    try { host.remove(); } catch (_) {}
-  }
-
-  return { getCanvas, getPngDataUrl, destroy };
-}
-
-/***********************
- * SweetAlert QR — NEW DESIGN (V2)
+ * ✅ SweetAlert QR — HTML (img only: no distortion)
  ***********************/
 function buildQrPopupHtmlV2({
-  autoId, dc, dcName, fullName, gender, companyResolved, phone, timestampClient
+  qrDataUrl, autoId, dc, dcName, fullName, gender, companyResolved, phone, timestampClient
 }) {
   return `
 <style>
@@ -373,8 +351,6 @@ function buildQrPopupHtmlV2({
   :root{
     --card1:#0b1020;
     --card2:#070a14;
-    --line:rgba(255,255,255,.10);
-    --soft:rgba(255,255,255,.06);
     --muted:rgba(226,232,240,.72);
     --accent1:#FF6B6B;
     --accent2:#F85B1A;
@@ -451,11 +427,11 @@ function buildQrPopupHtmlV2({
     display:grid;
     place-items:center;
   }
-  .q2QrFrame canvas,
   .q2QrFrame img{
     width:100% !important;
     height:100% !important;
     object-fit:contain !important;
+    image-rendering: pixelated; /* ช่วยคมบนบางเครื่อง */
   }
 
   .q2IdBar{
@@ -468,7 +444,6 @@ function buildQrPopupHtmlV2({
     background: rgba(0,0,0,.35);
     border:1px solid rgba(255,255,255,.10);
   }
-  .q2IdMeta{ min-width:0; }
   .q2IdLabel{ font-size:11px; color:var(--muted); margin-bottom:3px; }
   .q2IdCode{
     font-size:13px;
@@ -481,7 +456,6 @@ function buildQrPopupHtmlV2({
   }
 
   .q2BtnMini{
-    flex:0 0 auto;
     border:none;
     cursor:pointer;
     padding:9px 10px;
@@ -491,10 +465,8 @@ function buildQrPopupHtmlV2({
     color:#fff;
     background: rgba(255,255,255,.12);
     border:1px solid rgba(255,255,255,.14);
-    touch-action:manipulation;
     white-space:nowrap;
   }
-  .q2BtnMini:active{ transform:scale(.98); }
 
   .q2Grid{ display:grid; gap:8px; }
   .q2Row{
@@ -507,14 +479,7 @@ function buildQrPopupHtmlV2({
     border:1px solid rgba(255,255,255,.08);
   }
   .q2K{ font-size:12px; font-weight:900; color:rgba(226,232,240,.85); white-space:nowrap; }
-  .q2V{
-    font-size:13px;
-    color:#fff;
-    overflow-wrap:anywhere;
-    word-break:break-word;
-    line-height:1.35;
-    min-width:0;
-  }
+  .q2V{ font-size:13px; color:#fff; overflow-wrap:anywhere; word-break:break-word; line-height:1.35; }
 
   .q2Actions{ display:grid; gap:10px; margin-top:2px; }
   .q2Btn{
@@ -525,18 +490,17 @@ function buildQrPopupHtmlV2({
     border-radius:14px;
     font-weight:900;
     font-size:14px;
-    touch-action:manipulation;
   }
   .q2BtnPrimary{
     color:#fff;
     background: linear-gradient(135deg, var(--accent2), var(--accent1));
-    box-shadow: 0 14px 26px rgba(248,91,26,.22);
   }
   .q2BtnGhost{
     color:#fff;
     background: rgba(255,255,255,.08);
     border:1px solid rgba(255,255,255,.12);
   }
+
   .q2Hint{ text-align:center; font-size:12px; color:var(--muted); line-height:1.4; margin-top:2px; }
 
   .swal2-popup{ padding:0 !important; background:transparent !important; box-shadow:none !important; }
@@ -560,14 +524,15 @@ function buildQrPopupHtmlV2({
     </div>
 
     <div class="q2Body">
-
       <div class="q2QrShell">
         <div class="q2QrBox">
-          <div class="q2QrFrame" id="qrMount"></div>
+          <div class="q2QrFrame">
+            <img src="${escapeHtml(qrDataUrl)}" alt="QR Code">
+          </div>
         </div>
 
         <div class="q2IdBar">
-          <div class="q2IdMeta">
+          <div>
             <div class="q2IdLabel">รหัสพื้นที่</div>
             <div class="q2IdCode" id="idCode">${escapeHtml(autoId)}</div>
           </div>
@@ -597,7 +562,7 @@ function buildQrPopupHtmlV2({
 }
 
 /***********************
- * Submit (with NEW QR SweetAlert)
+ * Submit
  ***********************/
 let isSubmitting = false;
 
@@ -623,12 +588,9 @@ function bindSubmit() {
     const btn = document.getElementById('submitBtn');
     if (btn) btn.disabled = true;
 
-    let qr = null;
-
     try {
       const dc = $('#dcSelect').val();
       const dcName = $('#dcSelect option:selected').data('name') || '';
-
       const fullName = $('#fullName').val().trim();
       const gender = $('input[name="gender"]:checked').val();
       const phone = $('#phone').val().trim();
@@ -646,16 +608,15 @@ function bindSubmit() {
         timestampClient
       };
 
-      // ✅ สร้าง QR (canvas) แบบคมๆ
-      qr = createQrRenderer(autoId);
+      // ✅ สร้าง QR เป็น dataURL (Fix: แสดงชัวร์)
+      const qrDataUrl = await makeQrDataUrl(autoId);
 
-      // ✅ HTML ใหม่
-      const htmlContent = buildQrPopupHtmlV2(payload);
+      // ✅ popup html
+      const html = buildQrPopupHtmlV2({ ...payload, qrDataUrl });
 
-      // ✅ แสดง QR ก่อน (UX ดี)
       Swal.fire({
         title: '',
-        html: htmlContent,
+        html,
         showConfirmButton: false,
         showCloseButton: true,
         allowOutsideClick: true,
@@ -663,23 +624,6 @@ function bindSubmit() {
         padding: '0px',
         backdrop: true,
         didOpen: () => {
-          // mount QR canvas เข้าไปในกรอบ (ไม่บิด)
-          const mount = document.getElementById('qrMount');
-          if (mount) {
-            mount.innerHTML = '';
-            const canvas = qr.getCanvas();
-            const dataUrl = qr.getPngDataUrl();
-
-            if (canvas) mount.appendChild(canvas);
-            else if (dataUrl) {
-              const img = new Image();
-              img.alt = 'QR Code';
-              img.src = dataUrl;
-              mount.appendChild(img);
-            }
-          }
-
-          // copy
           document.getElementById('copy-id')?.addEventListener('click', async () => {
             try {
               await navigator.clipboard.writeText(autoId);
@@ -689,28 +633,20 @@ function bindSubmit() {
             }
           });
 
-          // download QR เพียวๆ (คมสุด ไม่บิด)
           document.getElementById('download-btn')?.addEventListener('click', () => {
-            const dataUrl = qr.getPngDataUrl();
-            if (!dataUrl) {
-              Swal.fire({ icon:'error', title:'ดาวน์โหลดไม่สำเร็จ', text:'ไม่พบข้อมูล QR' });
-              return;
-            }
-            downloadDataUrl(dataUrl, `${CFG.DOWNLOAD_PREFIX}_${autoId}_QR.png`);
+            downloadDataUrl(qrDataUrl, `${CFG.DOWNLOAD_PREFIX}_${autoId}_QR.png`);
           });
 
-          // close
           document.getElementById('close-btn')?.addEventListener('click', () => Swal.close());
         }
       }).then(() => {
-        // after close popup
         $('#registration-form')[0].reset();
         $('#companyOtherWrap').hide();
         document.getElementById('registration-form').style.display = 'none';
         showPrivacyMessage();
       });
 
-      // ✅ บันทึกหลังบ้าน (JSONP — no CORS)
+      // ✅ save to backend
       await api('saveData', payload);
 
     } catch (err) {
@@ -722,7 +658,6 @@ function bindSubmit() {
     } finally {
       isSubmitting = false;
       if (btn) btn.disabled = false;
-      try { qr?.destroy?.(); } catch (_) {}
     }
   });
 }
